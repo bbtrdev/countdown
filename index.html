@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>All Units Countdown</title>
+  <!-- Favicon -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%8F%B3%3C/text%3E%3C/svg%3E">
+
+  <!-- Pico.css -->
+  <link rel="stylesheet" href="https://unpkg.com/@picocss/pico@2/css/pico.min.css">
+  <style>
+    /* Exact 4 → 2 → 1 behavior; no 3-per-row breakpoint */
+    #stats {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(4, 1fr); /* default: 4 per row */
+      align-items: stretch;
+    }
+    @media (max-width: 1200px) {
+      #stats { grid-template-columns: repeat(2, 1fr); } /* medium: 2 per row */
+    }
+    @media (max-width: 640px) {
+      #stats { grid-template-columns: 1fr; } /* small: 1 per row */
+    }
+    /* Monospace + tabular digits to reduce flicker */
+    #stats p {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-variant-numeric: tabular-nums lining-nums;
+      font-feature-settings: "tnum" 1, "lnum" 1;
+      font-size: 1.35rem;
+      font-weight: 700;
+      white-space: nowrap;
+      margin: .25rem 0 0;
+      text-wrap: balance;
+    }
+    #stats article header {
+      margin: 0;
+      opacity: .8;
+      font-size: .9rem;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+    /* Tweak Pico spacing on the top form */
+    form  {
+        align-items: center;
+    }
+
+  </style>
+</head>
+<body>
+  <main class="container">
+    <hgroup>
+      <h1>All Units Countdown</h1>
+      <p>Local only. Bookmarkable URL. Live updates. Open source. Public Domain. </p>
+    </hgroup>
+
+    <form class="grid">
+        <label>
+            <small id="target-label">Target Date & Time:</small>
+            <input id="target" type="datetime-local" aria-describedby="target-label" />
+        </label>
+        <label>
+            <small id="title-label">Title:</small>
+            <input id="title" type="text" aria-describedby="title-label" />
+        </label>
+    </form>
+    <form class="grid">
+        <label class="switch">
+            <input id="base" type="checkbox" role="switch" checked> Base units
+          </label>
+        <label class="switch">
+            <input id="extra" type="checkbox" role="switch" checked> Extra units
+        </label>
+        <label class="switch">
+            <input id="special" type="checkbox" role="switch"> Special units
+        </label>
+    </form>
+
+    <form class="grid controls" onsubmit="return false">
+      <label class="switch">
+        <input id="utc" type="checkbox" role="switch"> UTC
+      </label>
+      <label>
+        <button type="button" id="share" class="secondary">Copy Link</button>
+      </label>
+
+      <label>
+        <button type="button" id="reset" class="secondary">Reset</button>
+      </label>
+    </form>
+
+    <section id="stats" aria-live="off">
+     
+    </section>
+
+    <section>
+        <p>Months/Years use average Gregorian lengths (365.25 d/yr, 30.4375 d/mo).</p>
+        <h4>Breakdown (rolling)</h4>
+        <p id="breakdown">—</p>
+    </section>
+
+    <footer>
+        Made by <a href="https://bbtr.dev">Bread & Butter</a>. <br>
+        <a href="https://github.com/omrigan/countdown">Open Source. Public Domain.</a>
+    </footer>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const pad = (n) => String(n).padStart(2, '0');
+
+    const DEFAULT_TARGET = new Date("2029-06-23T00:00:00");
+
+    // Time unit constants (ms) and unit definitions
+    const SEC = 1000;
+    const MIN = 60 * SEC;
+    const HR  = 60 * MIN;
+    const DAY = 24 * HR;
+    const WEEK = 7 * DAY;
+    const MONTH = 30.4375 * DAY; // average Gregorian month
+    const YEAR  = 365.25 * DAY;  // average Gregorian year
+    
+
+    const U235_HALF_LIFE = 703.8 * YEAR;
+    const HUMAN_LIFETIME = 85 * YEAR;
+    const MARTIAN_YEAR = 669 * DAY;
+
+    const cpu_freq = 4.511e9; // Top M4 speed
+    const CPU_TACTS = SEC / cpu_freq; 
+
+
+    // Extracted countdown card definitions as a dictionary for easy access
+    const COUNTDOWN_UNITS = {
+      years:        { label: 'Years',        ms: YEAR },
+      months:       { label: 'Months',       ms: MONTH },
+      weeks:        { label: 'Weeks',        ms: WEEK },
+      days:         { label: 'Days',         ms: DAY },
+      hours:        { label: 'Hours',        ms: HR },
+      minutes:      { label: 'Minutes',      ms: MIN },
+      seconds:      { label: 'Seconds',      ms: SEC },
+      milliseconds: { label: 'Milliseconds', ms: 1 },
+
+      u235halfLives:    { label: 'U-235 Half Lives', ms: U235_HALF_LIFE },
+      humanLifetimes:   { label: 'Human Lifetimes', ms: HUMAN_LIFETIME },
+      martianYears:     { label: 'Martian Years', ms: MARTIAN_YEAR },
+      cpuTacts:         { label: 'CPU Tacts', ms: CPU_TACTS },
+    };
+    const BASE_KEYS = ['months','days','minutes','seconds'];
+    const EXTRA_KEYS = ['years','weeks','hours','milliseconds'];
+    const SPECIAL_KEYS = ['u235halfLives','humanLifetimes','martianYears','cpuTacts'];
+
+
+    function formatLarge(value){
+      const billions = Math.floor(value/1e9);
+      var text = billions.toLocaleString() + ",<br>";
+      value -= billions*1e9;
+      text += Math.floor(value).toLocaleString();
+      return text;
+    }
+    
+
+    // Format rule: show 2 decimals if value < 1000, otherwise integer with separators
+    function formatCard(value){
+      if (value < 1) {
+        return value.toFixed(4);
+      }
+      if (value < 1000) {
+        return value.toFixed(2);
+      }
+      if (value < 1e9) {
+        return Math.floor(value).toLocaleString();
+      }
+      return formatLarge(value);
+    }
+
+    function getDate(){
+      const v = $("target").value;
+      if (!v) return null;
+      const useUTC = $("utc").checked;
+      const str = useUTC ? v + 'Z' : v;
+      return new Date(str);
+    }
+
+    function setDate(d){
+      const useUTC = $("utc").checked;
+      const val = useUTC ? d.toISOString().slice(0, 19) : toLocalDatetimeValue(d);
+      $("target").value = val;
+    }
+
+    // Rebuild and set the entire #stats section based on current target and units
+    function formatAll(units, keys){
+      const target = getDate();
+      if (!target) return;
+      const now = new Date();
+      const absMs = Math.abs(target - now);
+      const cards = keys.map((id) => {
+        const def = units[id];
+        const total = absMs / def.ms;
+        const value = formatCard(total);
+        return `<article>
+            <header>${def.label}</header>
+            <p id="${id}">${value}</p>
+        </article>`;
+      }).join('');
+      $("stats").innerHTML = cards;
+    }
+    
+    function parseQuery() {
+      const q = new URLSearchParams(location.search);
+      return q;
+    }
+
+    // Base64 URL-safe encode/decode helpers for config payload (UTF-8 safe)
+    function b64urlEncode(str){
+      const bytes = new TextEncoder().encode(str);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i++) {
+        bin += String.fromCharCode(bytes[i]);
+      }
+      const base64 = btoa(bin);
+      return base64.replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+    }
+    function b64urlDecode(str){
+      const padLen = (4 - (str.length % 4)) % 4;
+      const base64 = (str + '='.repeat(padLen)).replace(/-/g,'+').replace(/_/g,'/');
+      const bin = atob(base64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) {
+        bytes[i] = bin.charCodeAt(i);
+      }
+      return new TextDecoder().decode(bytes);
+    }
+
+    function readConfigFromUI(){
+      const d = getDate();
+      const useUTC = !!($("utc") && $("utc").checked);
+      return {
+        to: d ? (useUTC ? d.toISOString() : toLocalDatetimeValue(d)) : '',
+        title: ($("title") && $("title").value) || '',
+        utc: useUTC,
+        base: !!($("base") && $("base").checked),
+        extra: !!($("extra") && $("extra").checked),
+        special: !!($("special") && $("special").checked),
+      };
+    }
+    function applyConfigToUI(cfg){
+      if (!cfg) return;
+      if ($("utc")) $("utc").checked = !!cfg.utc;
+      if ($("title") && typeof cfg.title === 'string') {
+        $("title").value = cfg.title;
+      }
+      if (cfg.to) {
+        setDate(new Date(cfg.to));
+      }
+      if ($("base")) $("base").checked = !!cfg.base;
+      if ($("extra")) $("extra").checked = !!cfg.extra;
+      if ($("special")) $("special").checked = !!cfg.special;
+    }
+
+    function toLocalDatetimeValue(d) {
+      const dt = new Date(d);
+      const y = dt.getFullYear();
+      const m = pad(dt.getMonth() + 1);
+      const day = pad(dt.getDate());
+      const hh = pad(dt.getHours());
+      const mm = pad(dt.getMinutes());
+      const ss = pad(dt.getSeconds());
+      return `${y}-${m}-${day}T${hh}:${mm}:${ss}`;
+    }
+
+    function sortKeys(keys){
+      keys.sort((a, b) => COUNTDOWN_UNITS[b].ms - COUNTDOWN_UNITS[a].ms);
+    }
+
+    function reformat(){
+      var keys = [];
+      
+      if ($("base").checked) {
+        keys = keys.concat(BASE_KEYS);
+      }
+      if ($("extra").checked) {
+        keys = keys.concat(EXTRA_KEYS);
+      }
+      sortKeys(keys);
+      if ($("special").checked)  {
+        keys = keys.concat(SPECIAL_KEYS);
+      }
+      formatAll(COUNTDOWN_UNITS, keys);
+    }
+
+
+    function updateURL() {
+      try {
+        const cfg = readConfigFromUI();
+        const json = JSON.stringify(cfg);
+        const encoded = b64urlEncode(json);
+        const params = new URLSearchParams(location.search);
+        params.set('c', encoded);
+        const newUrl = `${location.pathname}?${params.toString()}`;
+        history.replaceState(null, '', newUrl);
+      } catch (_) {
+        // ignore
+      }
+    }
+
+    function setFromURL() {
+      const q = parseQuery();
+      const c = q.get('c');
+      if (!c) return;
+      try {
+        const json = b64urlDecode(c);
+        const cfg = JSON.parse(json);
+        applyConfigToUI(cfg);
+      } catch (_) {
+        // ignore malformed config
+      }
+    }
+
+    function resetURL() {
+      history.replaceState(null, '', location.pathname);
+    }
+
+    function setTitle(){
+      const input = $("title");
+      const title = input ? input.value.trim() : '';
+      var finalTitle = 'All Units Countdown';
+      if (title) finalTitle = title + ' | All Units Countdown';
+
+      const h1 = document.querySelector('h1');
+      if (h1) h1.textContent = finalTitle;
+      document.title = finalTitle;
+    }
+
+    function render(){
+      const now = new Date();
+      const target = getDate();
+      if (!target) return;
+      const diffMs = target - now;
+      const past = diffMs < 0;
+      const absMs = Math.abs(diffMs);
+
+    //   const msec = absMs % 1000;
+    //   const msecElem = $("milliseconds");
+    //   if (msecElem && msec != 1) {
+    //     msecElem.innerHTML = formatLarge(absMs);
+    //     return;
+    //   }
+
+      // Update the entire grid in one go
+      reformat();
+
+      // Rolling breakdown D HH:MM:SS
+      const d = Math.floor(absMs / DAY);
+      const h = Math.floor((absMs % DAY) / HR);
+      const m = Math.floor((absMs % HR) / MIN);
+      const s = Math.floor((absMs % MIN) / SEC);
+      var text = "";
+      if (past) {
+        text += "Since "
+      } else {
+        text += "Until "
+      }
+      const targetStr = $("target").value;
+      text += targetStr + " → " +
+        `${d}d ${pad(h)}:${pad(m)}:${pad(s)}`;
+
+      $("breakdown").textContent = text
+    }
+
+    function tick(){
+      try { render(); } catch (_) {}
+      requestAnimationFrame(tick);
+    }
+
+
+    function configChange(){
+        updateURL();
+        setTitle();
+        render();
+    }
+    // Init
+    (function init(){
+      setFromURL()
+
+      if (!getDate()) {
+        setDate(DEFAULT_TARGET);
+      }
+
+      setTitle();
+
+      requestAnimationFrame(tick);
+    })();
+
+    $("target").addEventListener('change', () => {
+      configChange();
+    });
+    $("title").addEventListener('change', () => {
+      configChange();
+    });
+    $("base").addEventListener('change', () => {
+      configChange();
+    });
+    $("extra").addEventListener('change', () => {
+      configChange();
+    });
+    $("special").addEventListener('change', () => {
+      configChange();
+    });
+    $("utc").addEventListener('change', () => {
+      configChange();
+    });
+
+    $("share").addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(location.href);
+        $("share").textContent = 'Link Copied';
+        setTimeout(() => $("share").textContent = 'Copy Link', 1200);
+      } catch (_) {
+        $("share").textContent = 'Copy Failed';
+        setTimeout(() => $("share").textContent = 'Copy Link', 1200);
+      }
+    });
+
+    $("reset").addEventListener('click', () => {
+      applyConfigToUI({
+        to: DEFAULT_TARGET,
+        title: '',
+        utc: false,
+        base: true,
+        extra: true,
+        special: false,
+      });
+      configChange();
+      resetURL();
+    });
+  </script>
+</body>
+</html>
