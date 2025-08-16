@@ -122,7 +122,7 @@
     const YEAR  = 365.25 * DAY;  // average Gregorian year
     
 
-    const U235_HALF_LIFE = 703.8 * YEAR;
+    const U235_HALF_LIFE = 703.8 * 1000 * 1000 * YEAR;
     const HUMAN_LIFETIME = 85 * YEAR;
     const MARTIAN_YEAR = 669 * DAY;
 
@@ -141,7 +141,7 @@
       seconds:      { label: 'Seconds',      ms: SEC },
       milliseconds: { label: 'Milliseconds', ms: 1 },
 
-      u235halfLives:    { label: 'U-235 Half Lives', ms: U235_HALF_LIFE },
+      u235halfLives:    { label: 'U-235 Half-Lives', ms: U235_HALF_LIFE },
       humanLifetimes:   { label: 'Human Lifetimes', ms: HUMAN_LIFETIME },
       martianYears:     { label: 'Martian Years', ms: MARTIAN_YEAR },
       cpuTacts:         { label: 'CPU Tacts', ms: CPU_TACTS },
@@ -162,6 +162,9 @@
 
     // Format rule: show 2 decimals if value < 1000, otherwise integer with separators
     function formatCard(value){
+      if (value < 0.0001) {
+        return value.toFixed(10);
+      }
       if (value < 1) {
         return value.toFixed(4);
       }
